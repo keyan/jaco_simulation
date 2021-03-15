@@ -18,8 +18,6 @@ find_package(catkin REQUIRED COMPONENTS
 
 find_package(Boost REQUIRED COMPONENTS system)
 find_package(GAZEBO REQUIRED)
-link_directories(${PROJECT_SOURCE_DIR}/lib/${CMAKE_LIBRARY_ARCHITECTURE})
-
 
 catkin_package(
   INCLUDE_DIRS
@@ -52,23 +50,6 @@ include_directories(
 )
 add_library(jaco_simulation src/jaco_robot_hw_sim.cpp)
 target_link_libraries(jaco_simulation ${catkin_LIBRARIES} ${GAZEBO_LIBRARIES})
-
-## Add cmake target dependencies of the executable/library
-## as an example, message headers may need to be generated before nodes
-# add_dependencies(jaco_hardware_node jaco_hardware_generate_messages_cpp)
-set(KINOVA_ARM_LIBS ${catkin_LIBRARIES})
-set(KINOVA_ARM_LIBS
-    ${KINOVA_ARM_LIBS}
-    -l:USBCommLayerUbuntu.so
-    -l:USBCommandLayerUbuntu.so)
-
-
-## Specify libraries to link a library or executable target against
-# target_link_libraries(${PROJECT_NAME}
-#    ${catkin_LIBRARIES}
-#    ${Boost_LIBRARIES}
-#    ${KINOVA_ARM_LIBS}
-#  )
 
 install(FILES robot_hw_sim_plugins.xml
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
