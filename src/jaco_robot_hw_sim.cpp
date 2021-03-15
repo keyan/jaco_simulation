@@ -1,11 +1,15 @@
-#include "JacoRobot.h"
+#include "jaco_robot_hw_sim.h"
 #include <cmath>        // std::abs
 
 using namespace std;
 
 
-JacoRobot::JacoRobot(ros::NodeHandle nh)
-: movehand_state(pr_hardware_interfaces::IDLE)
+bool JacoRobotHWSim::initSim(
+    const std::string& robot_namespace,
+    ros::NodeHandle model_nh,
+    gazebo::physics::ModelPtr parent_model,
+    const urdf::Model *const urdf_model,
+    std::vector<transmission_interface::TransmissionInfo> transmissions)
 {
     ROS_INFO("Starting to initialize jaco_hardware");
     int i;
@@ -130,45 +134,10 @@ JacoRobot::JacoRobot(ros::NodeHandle nh)
 
     registerInterface(&jm_interface);
 
-    eff_stall = false;
-
-    // Start Up Kinova API
-    int r = NO_ERROR_KINOVA;
-    
-    ROS_INFO("Attempting to inialize API...");
-    r = InitAPI();
-    if (r != NO_ERROR_KINOVA) {
-        ROS_ERROR("Could not initialize API: Error code %d",r);
-    }
-    
-    ROS_INFO("Attempting to initialize fingers...");
-    r = InitFingers();
-    if (r != NO_ERROR_KINOVA) {
-        ROS_ERROR("Could not initialize fingers: Error code %d",r);
-    }
-
-    ROS_INFO("Attempting to start API control of the robot...");
-    r = StartControlAPI();
-    if (r != NO_ERROR_KINOVA) {
-        ROS_ERROR("Could not start API Control: Error code %d",r);
-    }
-    
-    ROS_INFO("Attempting to set angular control...");
-    r = SetAngularControl();
-    if (r != NO_ERROR_KINOVA) {
-        ROS_ERROR("Could not set angular control: Error code %d",r);
-    }
-    
-    // ROS_INFO("Attempting to set force control mode...");
-    // r = StartForceControl();
-    // if (r != NO_ERROR_KINOVA) {
-    //    ROS_ERROR("Could not start force control: Error code %d",r);
-    // }
-    
     // get soft limits from rosparams
-    if (nh.hasParam("soft_limits/eff"))
+    if (model_nh.hasParam("soft_limits/eff"))
     {
-        nh.getParam("soft_limits/eff", soft_limits);
+        model_nh.getParam("soft_limits/eff", soft_limits);
         ROS_INFO("Set soft_limits for eff to: [%f,%f,%f,%f,%f,%f,%f,%f]",
             soft_limits[0], soft_limits[1], soft_limits[2], soft_limits[3],
             soft_limits[4], soft_limits[5], soft_limits[6], soft_limits[7]);
@@ -184,33 +153,13 @@ JacoRobot::JacoRobot(ros::NodeHandle nh)
 
     last_mode = hardware_interface::MODE_VELOCITY;
 
+    return true;
 }
 
-JacoRobot::~JacoRobot()
+void JacoRobotHWSim::initializeOffsets()
 {
-    int r = NO_ERROR_KINOVA;
-
-    ROS_INFO("Erase all trajectories");
-    r = EraseAllTrajectories();
-    if (r != NO_ERROR_KINOVA) {
-        ROS_ERROR("Could not erase trajectories: Error code %d",r);
-    }
-
-    r = StopControlAPI();
-    if (r != NO_ERROR_KINOVA) {
-        ROS_ERROR("Could not stop API Control: Error code %d",r);
-    }
-    r = CloseAPI();
-    if (r != NO_ERROR_KINOVA) {
-        ROS_ERROR("Could not close API Control: Error code %d",r);
-    }
-
-    ros::Duration(0.10).sleep();
-}
-
-void JacoRobot::initializeOffsets()
-{
-    this->read();
+    // // TODO might need to add back
+    // this->readSim();
 
     // Next, we wrap the positions so they are within -pi to pi of
     // the hardcoded midpoints, and add that to the offset.
@@ -231,57 +180,44 @@ void JacoRobot::initializeOffsets()
     }
 }
 
-ros::Time JacoRobot::get_time(void)
-{
-    return ros::Time::now();
-}
-
-ros::Duration JacoRobot::get_period(void)
-{
-    // TODO(benwr): What is a reasonable period?
-    // Here I've assumed  10ms
-    return ros::Duration(0.01);
-}
-
-inline double JacoRobot::degreesToRadians(double degrees)
+inline double JacoRobotHWSim::degreesToRadians(double degrees)
 {
     return (M_PI / 180.0) * degrees;
 }
 
-inline double JacoRobot::radiansToDegrees(double radians)
+inline double JacoRobotHWSim::radiansToDegrees(double radians)
 {
     return (180.0 / M_PI) * radians;
 }
 
-inline double JacoRobot::radiansToFingerTicks(double radians)
+inline double JacoRobotHWSim::radiansToFingerTicks(double radians)
 {
     return (6800.0 / 80) * radians * 180.0 / M_PI; //this magic number was found in the kinova-ros code, kinova_driver/src/kinova_arm.cpp
 }
 
-inline double JacoRobot::fingerTicksToRadians(double ticks)
+inline double JacoRobotHWSim::fingerTicksToRadians(double ticks)
 {
     return ticks * (80 / 6800.0) * M_PI / 180.0;  //this magic number was found in the kinova-ros code, kinova_driver/src/kinova_arm.cpp
 }
 
-// TODO unused?
-void JacoRobot::sendPositionCommand(const std::vector<double>& command)
+void JacoRobotHWSim::sendPositionCommand(const std::vector<double>& command)
 {
     // Need to send an "advance trajectory" with a single point and the correct settings
     // Angular position
     AngularInfo joint_pos;
     joint_pos.InitStruct();
-    
+
     joint_pos.Actuator1 = float(radiansToDegrees(command.at(0) - pos_offsets[0]));
     joint_pos.Actuator2 = float(radiansToDegrees(command.at(1) - pos_offsets[1]));
     joint_pos.Actuator3 = float(radiansToDegrees(command.at(2) - pos_offsets[2]));
     joint_pos.Actuator4 = float(radiansToDegrees(command.at(3) - pos_offsets[3]));
     joint_pos.Actuator5 = float(radiansToDegrees(command.at(4) - pos_offsets[4]));
     joint_pos.Actuator6 = float(radiansToDegrees(command.at(5) - pos_offsets[5]));
-    
+
     TrajectoryPoint trajectory;
     trajectory.InitStruct(); // initialize structure
     memset(&trajectory, 0, sizeof(trajectory));  // zero out the structure
-    // trajectory.Position.Type = ANGULAR_POSITION; // set to angular position 
+    // trajectory.Position.Type = ANGULAR_POSITION; // set to angular position
     // trajectory.Position.Actuators = joint_pos; // position is passed in the position struct
 
     trajectory.Position.Delay = 0.0;
@@ -298,8 +234,7 @@ void JacoRobot::sendPositionCommand(const std::vector<double>& command)
 
 }
 
-// TODO unused?
-void JacoRobot::sendFingerPositionCommand(const std::vector<double>& command)
+void JacoRobotHWSim::sendFingerPositionCommand(const std::vector<double>& command)
 {
 
     // ROS_INFO_STREAM("pos finger" << command[6] << " " << command[7]);
@@ -309,13 +244,13 @@ void JacoRobot::sendFingerPositionCommand(const std::vector<double>& command)
 
     AngularPosition arm_pos;
     GetAngularPosition(arm_pos);
-    
+
     TrajectoryPoint trajectory;
     trajectory.InitStruct(); // initialize structure
     memset(&trajectory, 0, sizeof(trajectory));  // zero out the structure
 
     // Set arm velocity to zero
-    trajectory.Position.Type = ANGULAR_POSITION; // set to angular velocity 
+    trajectory.Position.Type = ANGULAR_POSITION; // set to angular velocity
     trajectory.Position.Actuators = arm_pos.Actuators;;
 
     trajectory.Position.Delay = 0.0;
@@ -333,7 +268,7 @@ void JacoRobot::sendFingerPositionCommand(const std::vector<double>& command)
     }
 }
 
-void JacoRobot::sendVelocityCommand(const std::vector<double>& command)
+void JacoRobotHWSim::sendVelocityCommand(const std::vector<double>& command)
 {
     // Need to send an "advance trajectory" with a single point and the correct settings
     // Angular velocity
@@ -349,7 +284,7 @@ void JacoRobot::sendVelocityCommand(const std::vector<double>& command)
     joint_vel.Actuator4 = float(radiansToDegrees(command.at(3)));
     joint_vel.Actuator5 = float(radiansToDegrees(command.at(4)));
     joint_vel.Actuator6 = float(radiansToDegrees(command.at(5)));
-    
+
     TrajectoryPoint trajectory;
     trajectory.InitStruct();
     memset(&trajectory, 0, sizeof(trajectory));
@@ -361,7 +296,7 @@ void JacoRobot::sendVelocityCommand(const std::vector<double>& command)
     trajectory.Position.Type = ANGULAR_VELOCITY;
     trajectory.Position.Fingers.Finger1 = float(radiansToFingerTicks(command.at(6)));
     trajectory.Position.Fingers.Finger2 = float(radiansToFingerTicks(command.at(7)));
-    
+
     int r = NO_ERROR_KINOVA;
     r = SendAdvanceTrajectory(trajectory);
     if (r != NO_ERROR_KINOVA) {
@@ -369,8 +304,7 @@ void JacoRobot::sendVelocityCommand(const std::vector<double>& command)
     }
 }
 
-// TODO unused?
-void JacoRobot::sendTorqueCommand(const std::vector<double>& command)
+void JacoRobotHWSim::sendTorqueCommand(const std::vector<double>& command)
 {
     std::vector<float> joint_eff;
     joint_eff.reserve(command.size());
@@ -387,44 +321,29 @@ void JacoRobot::sendTorqueCommand(const std::vector<double>& command)
     }
 }
 
-void JacoRobot::write(void)
+void JacoRobotHWSim::writeSim(ros::Time time, ros::Duration period)
 {
     sendVelocityCommand(cmd_vel);
 }
 
-// TODO unused?
-void JacoRobot::checkForStall(void)
-{
-    // check soft limits.
-
-    bool all_in_limits = true;
-    for (int i = 0; i < num_full_dof; i++)
-    {
-        if (eff[i] < -soft_limits[i] || eff[i] > soft_limits[i])
-        {
-            all_in_limits = false;
-            ROS_WARN("Exceeded soft effort limits on joint %d. Limit=%f, Measured=%f", i, soft_limits[i], eff[i]);
-        }
-    }
-}
-
-void JacoRobot::read(void)
+void JacoRobotHWSim::readSim(ros::Time time, ros::Duration period)
 {
     // make sure that pos, vel, and eff are up to date.
     // TODO: If there is too much lag between calling read()
     // and getting the actual values back, we'll need to be
     // reading values constantly and storing them locally, so
     // at least there is a recent value available for the controller.
-    
+
     AngularPosition arm_pos;
     AngularPosition arm_vel;
     AngularPosition arm_torq;
-    
+
+    // TODO must call to simulated joints
     // Requires 3 seperate calls to the USB
-    GetAngularPosition(arm_pos);
-    GetAngularVelocity(arm_vel);
-    GetAngularForce(arm_torq);
-    
+    // GetAngularPosition(arm_pos);
+    // GetAngularVelocity(arm_vel);
+    // GetAngularForce(arm_torq);
+
     pos[0] = degreesToRadians(double(arm_pos.Actuators.Actuator1)) + pos_offsets[0];
     pos[1] = degreesToRadians(double(arm_pos.Actuators.Actuator2)) + pos_offsets[1];
     pos[2] = degreesToRadians(double(arm_pos.Actuators.Actuator3)) + pos_offsets[2];
@@ -433,7 +352,7 @@ void JacoRobot::read(void)
     pos[5] = degreesToRadians(double(arm_pos.Actuators.Actuator6)) + pos_offsets[5];
     pos[6] = fingerTicksToRadians(double(arm_pos.Fingers.Finger1));
     pos[7] = fingerTicksToRadians(double(arm_pos.Fingers.Finger2));
-    
+
     // According to kinova-ros, the reported values are half of the actual.
     vel[0] = degreesToRadians(double(arm_vel.Actuators.Actuator1));
     vel[1] = degreesToRadians(double(arm_vel.Actuators.Actuator2));
@@ -452,7 +371,4 @@ void JacoRobot::read(void)
     eff[5] = arm_torq.Actuators.Actuator6;
     eff[6] = arm_torq.Fingers.Finger2;
     eff[7] = arm_torq.Fingers.Finger2;
-    
 }
-
-

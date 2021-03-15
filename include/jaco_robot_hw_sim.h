@@ -1,5 +1,5 @@
-#ifndef JACO_ROBOT_H
-#define JACO_ROBOT_H
+#ifndef JACO_ROBOT_HW_SIM_H
+#define JACO_ROBOT_HW_SIM_H
 
 // ros_control
 #include <hardware_interface/joint_command_interface.h>
@@ -15,14 +15,22 @@
 #include <ros/ros.h>
 #include <ros/console.h>
 
-// kinova api
-#include <kinova/KinovaTypes.h>
-#include <kinova/Kinova.API.USBCommandLayerUbuntu.h>
+// Gazebo
+#include <gazebo/common/common.hh>
+#include <gazebo/physics/physics.hh>
+#include <gazebo/gazebo.hh>
+#include <gazebo_ros_control/robot_hw_sim.h>
+
+#include <urdf/model.h>
 
 // c++
 #include <stdexcept>
 #include <limits>
 #include <iostream>
+
+// kinova api
+#include <kinova/KinovaTypes.h>
+#include <kinova/Kinova.API.USBCommandLayerUbuntu.h>
 
 using namespace std;
 
@@ -32,18 +40,10 @@ static const int num_full_dof = 8;
 static const int num_arm_dof = 6;
 static const int num_finger_dof = 2;
 
-class JacoRobot: public hardware_interface::RobotHW
+class JacoRobotHWSim: public gazebo_ros_control::RobotHWSim
 {
     public:
-        JacoRobot(ros::NodeHandle nh);
-
-        virtual ~JacoRobot();
-        
         void initializeOffsets();
-        
-        ros::Time get_time(void);
-
-        ros::Duration get_period(void);
 
         inline double degreesToRadians(double degrees);
         inline double radiansToDegrees(double radians);
@@ -55,12 +55,15 @@ class JacoRobot: public hardware_interface::RobotHW
         void sendTorqueCommand(const std::vector<double>& command);
         void sendFingerPositionCommand(const std::vector<double>& command);
 
-        void write(void);
-        void read(void);
-
-        void checkForStall(void);
-
-        bool eff_stall;
+        // Pure virtual methods required for RobotHWSim.
+        virtual bool initSim(
+            const std::string& robot_namespace,
+            ros::NodeHandle model_nh,
+            gazebo::physics::ModelPtr parent_model,
+            const urdf::Model *const urdf_model,
+            std::vector<transmission_interface::TransmissionInfo> transmissions);
+        virtual void readSim(ros::Time time, ros::Duration period);
+        virtual void writeSim(ros::Time time, ros::Duration period);
 
     private:
         hardware_interface::JointStateInterface jnt_state_interface;
@@ -70,7 +73,7 @@ class JacoRobot: public hardware_interface::RobotHW
         hardware_interface::JointModeInterface jm_interface;
 
         pr_hardware_interfaces::PositionCommandInterface movehand_interface;
-        pr_hardware_interfaces::MoveState movehand_state;
+        pr_hardware_interfaces::MoveState movehand_state = pr_hardware_interfaces::IDLE;
 
         //JacoArm *arm;
         vector<double> cmd_pos;
@@ -88,4 +91,3 @@ class JacoRobot: public hardware_interface::RobotHW
 };
 
 #endif
-

@@ -1,0 +1,11 @@
+<library path="lib/libjaco_simulation">
+
+  <class
+    name="jaco_simulation/JacoRobotHWSim"
+    type="jaco_simulation::JacoRobotHWSim"
+    base_class_type="gazebo_ros_control::RobotHWSim">
+    <description>
+      Jaco simulation interface to replace Gazebo's DefaultRobotHWSim.
+    </description>
+  </class>
+</library>

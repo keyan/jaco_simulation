@@ -12,9 +12,12 @@ find_package(catkin REQUIRED COMPONENTS
     pr_ros_controllers
     pr_hardware_interfaces
     sensor_msgs
+    gazebo_ros_control
+    pluginlib
     )
 
 find_package(Boost REQUIRED COMPONENTS system)
+find_package(GAZEBO REQUIRED)
 link_directories(${PROJECT_SOURCE_DIR}/lib/${CMAKE_LIBRARY_ARCHITECTURE})
 
 
@@ -27,6 +30,8 @@ catkin_package(
     controller_manager
     hardware_interface
     sensor_msgs
+    gazebo_ros_control
+    pluginlib
 )
 
 ###########
@@ -34,21 +39,19 @@ catkin_package(
 ###########
 
 ## Specify additional locations of header files
-## Your package locations should be listed before other locations
+link_directories(
+  ${GAZEBO_LIBRARY_DIRS}
+  ${catkin_LIBRARY_DIRS}
+)
 include_directories(
   include
   ${Boost_INCLUDE_DIRS}
   ${libkindrv_INCLUDE_DIRS}
   ${catkin_INCLUDE_DIRS}
+  ${GAZEBO_INCLUDE_DIRS}
 )
-
-## Declare a cpp library
-# add_library(jaco_hardware
-#   src/${PROJECT_NAME}/jaco_hardware.cpp
-# )
-
-## Declare a cpp executable
-add_executable(${PROJECT_NAME} src/main.cpp src/JacoRobot.cpp)
+add_library(jaco_simulation src/jaco_robot_hw_sim.cpp)
+target_link_libraries(jaco_simulation ${catkin_LIBRARIES} ${GAZEBO_LIBRARIES})
 
 ## Add cmake target dependencies of the executable/library
 ## as an example, message headers may need to be generated before nodes
@@ -61,10 +64,12 @@ set(KINOVA_ARM_LIBS
 
 
 ## Specify libraries to link a library or executable target against
-target_link_libraries(${PROJECT_NAME}
-   ${catkin_LIBRARIES}
-   ${Boost_LIBRARIES}
-   ${KINOVA_ARM_LIBS}
- )
+# target_link_libraries(${PROJECT_NAME}
+#    ${catkin_LIBRARIES}
+#    ${Boost_LIBRARIES}
+#    ${KINOVA_ARM_LIBS}
+#  )
 
-
+install(FILES robot_hw_sim_plugins.xml
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
