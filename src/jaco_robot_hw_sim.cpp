@@ -11,7 +11,7 @@ bool JacoRobotHWSim::initSim(
     const urdf::Model *const urdf_model,
     std::vector<transmission_interface::TransmissionInfo> transmissions)
 {
-    ROS_INFO("Starting to initialize jaco_hardware");
+    ROS_INFO("Starting to initialize jaco_simulation control plugin");
     int i;
     cmd_pos.resize(num_full_dof);
     cmd_vel.resize(num_full_dof);
@@ -153,6 +153,26 @@ bool JacoRobotHWSim::initSim(
 
     last_mode = hardware_interface::MODE_VELOCITY;
 
+    // For each joint in the robot, find the joint in Gazebo which is simulating it, then keep
+    // a pointer to the Gazebo joint. These are used to read/write joint states to/from Gazebo.
+    for (int j = 0; j < joint_names_.size(); j++) {
+        gazebo::physics::JointPtr joint = parent_model->GetJoint(joint_names_[j]);
+        if (!joint)
+        {
+          ROS_ERROR_STREAM_NAMED("jaco_robot_hw_sim", "This robot has a joint named \"" << joint_names_[j]
+            << "\" which is not in the gazebo model.");
+          return false;
+        }
+        sim_joints_.push_back(joint);
+    }
+
+    // Get physics engine type
+    gazebo::physics::PhysicsEnginePtr physics = gazebo::physics::get_world()->Physics();
+    physics_type_ = physics->GetType();
+    if (physics_type_.empty()) {
+        ROS_WARN_STREAM_NAMED("jaco_robot_hw_sim", "No physics type found.");
+    }
+
     return true;
 }
 
@@ -180,195 +200,35 @@ void JacoRobotHWSim::initializeOffsets()
     }
 }
 
-inline double JacoRobotHWSim::degreesToRadians(double degrees)
-{
-    return (M_PI / 180.0) * degrees;
-}
-
-inline double JacoRobotHWSim::radiansToDegrees(double radians)
-{
-    return (180.0 / M_PI) * radians;
-}
-
-inline double JacoRobotHWSim::radiansToFingerTicks(double radians)
-{
-    return (6800.0 / 80) * radians * 180.0 / M_PI; //this magic number was found in the kinova-ros code, kinova_driver/src/kinova_arm.cpp
-}
-
-inline double JacoRobotHWSim::fingerTicksToRadians(double ticks)
-{
-    return ticks * (80 / 6800.0) * M_PI / 180.0;  //this magic number was found in the kinova-ros code, kinova_driver/src/kinova_arm.cpp
-}
-
-void JacoRobotHWSim::sendPositionCommand(const std::vector<double>& command)
-{
-    // Need to send an "advance trajectory" with a single point and the correct settings
-    // Angular position
-    AngularInfo joint_pos;
-    joint_pos.InitStruct();
-
-    joint_pos.Actuator1 = float(radiansToDegrees(command.at(0) - pos_offsets[0]));
-    joint_pos.Actuator2 = float(radiansToDegrees(command.at(1) - pos_offsets[1]));
-    joint_pos.Actuator3 = float(radiansToDegrees(command.at(2) - pos_offsets[2]));
-    joint_pos.Actuator4 = float(radiansToDegrees(command.at(3) - pos_offsets[3]));
-    joint_pos.Actuator5 = float(radiansToDegrees(command.at(4) - pos_offsets[4]));
-    joint_pos.Actuator6 = float(radiansToDegrees(command.at(5) - pos_offsets[5]));
-
-    TrajectoryPoint trajectory;
-    trajectory.InitStruct(); // initialize structure
-    memset(&trajectory, 0, sizeof(trajectory));  // zero out the structure
-    // trajectory.Position.Type = ANGULAR_POSITION; // set to angular position
-    // trajectory.Position.Actuators = joint_pos; // position is passed in the position struct
-
-    trajectory.Position.Delay = 0.0;
-    trajectory.Position.HandMode = POSITION_MODE;
-    trajectory.Position.Type = ANGULAR_POSITION;
-    trajectory.Position.Fingers.Finger1 = float(radiansToFingerTicks(command.at(6)));
-    trajectory.Position.Fingers.Finger2 = float(radiansToFingerTicks(command.at(7)));
-
-    int r = NO_ERROR_KINOVA;
-    r = SendAdvanceTrajectory(trajectory);
-    if (r != NO_ERROR_KINOVA) {
-        ROS_ERROR("Could not send : Error code %d",r);
-    }
-
-}
-
-void JacoRobotHWSim::sendFingerPositionCommand(const std::vector<double>& command)
-{
-
-    // ROS_INFO_STREAM("pos finger" << command[6] << " " << command[7]);
-
-    // Need to send an "advance trajectory" with a single point and the correct settings
-    // Angular position
-
-    AngularPosition arm_pos;
-    GetAngularPosition(arm_pos);
-
-    TrajectoryPoint trajectory;
-    trajectory.InitStruct(); // initialize structure
-    memset(&trajectory, 0, sizeof(trajectory));  // zero out the structure
-
-    // Set arm velocity to zero
-    trajectory.Position.Type = ANGULAR_POSITION; // set to angular velocity
-    trajectory.Position.Actuators = arm_pos.Actuators;;
-
-    trajectory.Position.Delay = 0.0;
-    trajectory.Position.HandMode = POSITION_MODE;
-    trajectory.Position.Type = ANGULAR_POSITION;
-    trajectory.LimitationsActive = 0;
-
-    trajectory.Position.Fingers.Finger1 = float(radiansToFingerTicks(command.at(6)));
-    trajectory.Position.Fingers.Finger2 = float(radiansToFingerTicks(command.at(7)));
-
-    int r = NO_ERROR_KINOVA;
-    r = SendBasicTrajectory(trajectory);
-    if (r != NO_ERROR_KINOVA) {
-        ROS_ERROR("Could not send : Error code %d",r);
-    }
-}
-
-void JacoRobotHWSim::sendVelocityCommand(const std::vector<double>& command)
-{
-    // Need to send an "advance trajectory" with a single point and the correct settings
-    // Angular velocity
-    // ROS_INFO_STREAM("vel " << command[0] << " " << command[1] << " "
-    //     << command[2] << " " << command[3] << " " << command[4] << " "
-    //     << command[5] << " " << command[6] << " " << command[7]);
-
-    AngularInfo joint_vel;
-    joint_vel.InitStruct();
-    joint_vel.Actuator1 = float(radiansToDegrees(command.at(0)));
-    joint_vel.Actuator2 = float(radiansToDegrees(command.at(1)));
-    joint_vel.Actuator3 = float(radiansToDegrees(command.at(2)));
-    joint_vel.Actuator4 = float(radiansToDegrees(command.at(3)));
-    joint_vel.Actuator5 = float(radiansToDegrees(command.at(4)));
-    joint_vel.Actuator6 = float(radiansToDegrees(command.at(5)));
-
-    TrajectoryPoint trajectory;
-    trajectory.InitStruct();
-    memset(&trajectory, 0, sizeof(trajectory));
-
-    trajectory.Position.Type = ANGULAR_VELOCITY;
-    trajectory.Position.Actuators = joint_vel;
-
-    trajectory.Position.HandMode = VELOCITY_MODE;
-    trajectory.Position.Type = ANGULAR_VELOCITY;
-    trajectory.Position.Fingers.Finger1 = float(radiansToFingerTicks(command.at(6)));
-    trajectory.Position.Fingers.Finger2 = float(radiansToFingerTicks(command.at(7)));
-
-    int r = NO_ERROR_KINOVA;
-    r = SendAdvanceTrajectory(trajectory);
-    if (r != NO_ERROR_KINOVA) {
-        ROS_ERROR("Could not send : Error code %d",r);
-    }
-}
-
-void JacoRobotHWSim::sendTorqueCommand(const std::vector<double>& command)
-{
-    std::vector<float> joint_eff;
-    joint_eff.reserve(command.size());
-    for (std::size_t i = 0; i < command.size(); ++i)
-    {
-        joint_eff.push_back(float(command[i]));
-    }
-    ROS_INFO_STREAM("eff " << float(joint_eff[5]));
-
-    int r = NO_ERROR_KINOVA;
-    r = SendAngularTorqueCommand(&joint_eff[0]);
-    if (r != NO_ERROR_KINOVA) {
-        ROS_ERROR("Could not send : Error code %d",r);
-    }
-}
-
 void JacoRobotHWSim::writeSim(ros::Time time, ros::Duration period)
 {
-    sendVelocityCommand(cmd_vel);
+    for(unsigned int j = 0; j < sim_joints_.size(); j++) {
+        sim_joints_[j]->SetVelocity(0, cmd_vel.at(j));
+
+        // TODO
+        // PID controller, must have gains available
+        // double error;
+        // if (e_stop_active_)
+        //   error = -joint_velocity_[j];
+        // else
+        //   error = joint_velocity_command_[j] - joint_velocity_[j];
+        // const double effort_limit = joint_effort_limits_[j];
+        // const double effort = clamp(pid_controllers_[j].computeCommand(error, period),
+        //                             -effort_limit, effort_limit);
+        // sim_joints_[j]->SetForce(0, effort);
+    }
+
 }
 
 void JacoRobotHWSim::readSim(ros::Time time, ros::Duration period)
 {
-    // make sure that pos, vel, and eff are up to date.
-    // TODO: If there is too much lag between calling read()
-    // and getting the actual values back, we'll need to be
-    // reading values constantly and storing them locally, so
-    // at least there is a recent value available for the controller.
+    for(unsigned int j = 0; j < sim_joints_.size(); j++) {
+        double position = sim_joints_[j]->Position(0);
 
-    AngularPosition arm_pos;
-    AngularPosition arm_vel;
-    AngularPosition arm_torq;
-
-    // TODO must call to simulated joints
-    // Requires 3 seperate calls to the USB
-    // GetAngularPosition(arm_pos);
-    // GetAngularVelocity(arm_vel);
-    // GetAngularForce(arm_torq);
-
-    pos[0] = degreesToRadians(double(arm_pos.Actuators.Actuator1)) + pos_offsets[0];
-    pos[1] = degreesToRadians(double(arm_pos.Actuators.Actuator2)) + pos_offsets[1];
-    pos[2] = degreesToRadians(double(arm_pos.Actuators.Actuator3)) + pos_offsets[2];
-    pos[3] = degreesToRadians(double(arm_pos.Actuators.Actuator4)) + pos_offsets[3];
-    pos[4] = degreesToRadians(double(arm_pos.Actuators.Actuator5)) + pos_offsets[4];
-    pos[5] = degreesToRadians(double(arm_pos.Actuators.Actuator6)) + pos_offsets[5];
-    pos[6] = fingerTicksToRadians(double(arm_pos.Fingers.Finger1));
-    pos[7] = fingerTicksToRadians(double(arm_pos.Fingers.Finger2));
-
-    // According to kinova-ros, the reported values are half of the actual.
-    vel[0] = degreesToRadians(double(arm_vel.Actuators.Actuator1));
-    vel[1] = degreesToRadians(double(arm_vel.Actuators.Actuator2));
-    vel[2] = degreesToRadians(double(arm_vel.Actuators.Actuator3));
-    vel[3] = degreesToRadians(double(arm_vel.Actuators.Actuator4));
-    vel[4] = degreesToRadians(double(arm_vel.Actuators.Actuator5));
-    vel[5] = degreesToRadians(double(arm_vel.Actuators.Actuator6));
-    vel[6] = fingerTicksToRadians(double(arm_vel.Fingers.Finger1));
-    vel[7] = fingerTicksToRadians(double(arm_vel.Fingers.Finger2));
-
-    eff[0] = arm_torq.Actuators.Actuator1;
-    eff[1] = arm_torq.Actuators.Actuator2;
-    eff[2] = arm_torq.Actuators.Actuator3;
-    eff[3] = arm_torq.Actuators.Actuator4;
-    eff[4] = arm_torq.Actuators.Actuator5;
-    eff[5] = arm_torq.Actuators.Actuator6;
-    eff[6] = arm_torq.Fingers.Finger2;
-    eff[7] = arm_torq.Fingers.Finger2;
+        pos[j] += angles::shortest_angular_distance(pos[j], position);
+        eff[j] = sim_joints_[j]->GetForce((unsigned int)(0));
+        vel[j] = sim_joints_[j]->GetVelocity(0);
+    }
 }
+
+PLUGINLIB_EXPORT_CLASS(JacoRobotHWSim, gazebo_ros_control::RobotHWSim)

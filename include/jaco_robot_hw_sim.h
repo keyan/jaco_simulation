@@ -14,6 +14,9 @@
 // ros
 #include <ros/ros.h>
 #include <ros/console.h>
+#include <angles/angles.h>
+#include <pluginlib/class_list_macros.h>
+#include <pluginlib/class_loader.h>
 
 // Gazebo
 #include <gazebo/common/common.hh>
@@ -28,10 +31,6 @@
 #include <limits>
 #include <iostream>
 
-// kinova api
-#include <kinova/KinovaTypes.h>
-#include <kinova/Kinova.API.USBCommandLayerUbuntu.h>
-
 using namespace std;
 
 // This makes the reported joint values to start within urdf limits
@@ -44,16 +43,6 @@ class JacoRobotHWSim: public gazebo_ros_control::RobotHWSim
 {
     public:
         void initializeOffsets();
-
-        inline double degreesToRadians(double degrees);
-        inline double radiansToDegrees(double radians);
-        inline double radiansToFingerTicks(double radians);
-        inline double fingerTicksToRadians(double ticks);
-
-        void sendPositionCommand(const std::vector<double>& command);
-        void sendVelocityCommand(const std::vector<double>& command);
-        void sendTorqueCommand(const std::vector<double>& command);
-        void sendFingerPositionCommand(const std::vector<double>& command);
 
         // Pure virtual methods required for RobotHWSim.
         virtual bool initSim(
@@ -88,6 +77,19 @@ class JacoRobotHWSim: public gazebo_ros_control::RobotHWSim
         vector<double> zero_velocity_command;
         int joint_mode; // this tells whether we're in position or velocity control mode
         int last_mode;
+
+        // Gazebo specific section.
+        // enum ControlMethod {EFFORT, POSITION, POSITION_PID, VELOCITY, VELOCITY_PID};
+        // std::vector<ControlMethod> joint_control_methods_;
+
+        std::vector<std::string> joint_names_ = {
+            "j2n6s200_joint_1", "j2n6s200_joint_2", "j2n6s200_joint_3",
+            "j2n6s200_joint_4", "j2n6s200_joint_5", "j2n6s200_joint_6",
+            "j2n6s200_joint_finger_1", "j2n6s200_joint_finger_2",
+        };
+        std::vector<gazebo::physics::JointPtr> sim_joints_;
+
+        std::string physics_type_;
 };
 
 #endif
