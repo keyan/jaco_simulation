@@ -203,8 +203,14 @@ void JacoRobotHWSim::initializeOffsets()
 void JacoRobotHWSim::writeSim(ros::Time time, ros::Duration period)
 {
     for(unsigned int j = 0; j < sim_joints_.size(); j++) {
-        sim_joints_[j]->SetVelocity(0, cmd_vel.at(j));
-
+        if (physics_type_.compare("ode") == 0)
+        {
+          sim_joints_[j]->SetParam("vel", 0, cmd_vel.at(j));
+        }
+        else
+        {
+          sim_joints_[j]->SetVelocity(0, cmd_vel.at(j));
+        }
         // TODO
         // PID controller, must have gains available
         // double error;
